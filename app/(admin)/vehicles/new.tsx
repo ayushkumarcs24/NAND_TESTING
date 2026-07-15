@@ -23,7 +23,7 @@ export default function NewVehicleScreen() {
       await createVehicle({ vehicle_no: vehicleNo.trim(), driver_name: driverName.trim() }, session!.userId);
       router.back();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to save vehicle.';
+      const msg = (e && typeof e === 'object' && 'message' in e) ? (e as any).message : String(e);
       Alert.alert('Error', msg.includes('unique') ? 'Vehicle No. already exists.' : msg);
     } finally {
       setSaving(false);

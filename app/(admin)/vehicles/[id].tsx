@@ -41,7 +41,7 @@ export default function EditVehicleScreen() {
       await updateVehicle(id!, { vehicle_no: vehicleNo.trim(), driver_name: driverName.trim(), active }, session!.userId);
       router.back();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to update.';
+      const msg = (e && typeof e === 'object' && 'message' in e) ? (e as any).message : String(e);
       Alert.alert('Error', msg.includes('unique') ? 'Vehicle No. already exists.' : msg);
     } finally {
       setSaving(false);

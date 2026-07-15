@@ -51,7 +51,7 @@ export default function EditSamitiScreen() {
       }, session!.userId);
       router.back();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to update.';
+      const msg = (e && typeof e === 'object' && 'message' in e) ? (e as any).message : String(e);
       Alert.alert('Error', msg.includes('unique') ? 'Samiti Code already exists.' : msg);
     } finally {
       setSaving(false);

@@ -41,7 +41,7 @@ export default function NewUserScreen() {
       await createUser({ phone: phone.trim(), name: name.trim(), password, role, preferred_language: language }, session!.userId);
       router.back();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to create user.';
+      const msg = (e && typeof e === 'object' && 'message' in e) ? (e as any).message : String(e);
       Alert.alert('Error', msg.includes('unique') ? 'Phone number already registered.' : msg);
     } finally {
       setSaving(false);
