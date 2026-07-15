@@ -1,11 +1,13 @@
 {
   "expo": {
-    "name": "nand-dairy",
+    "name": "Nand Dairy",
     "slug": "nand-dairy",
     "version": "1.0.0",
+    "scheme": "nanddairy",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": ["expo-router", "expo-sqlite"],
     "ios": {
       "supportsTablet": true
     },

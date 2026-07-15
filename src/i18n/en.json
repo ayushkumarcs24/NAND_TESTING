@@ -1,0 +1,32 @@
+{
+  "login": {
+    "title": "Nand Dairy",
+    "subtitle": "Milk Collection Management",
+    "phonePlaceholder": "Mobile Number",
+    "passwordPlaceholder": "Password",
+    "loginButton": "Login",
+    "invalidCredentials": "Invalid phone or password. Please try again.",
+    "accountLocked": "Account is locked due to too many failed attempts. Contact admin.",
+    "accountDisabled": "Your account has been deactivated. Contact admin.",
+    "networkError": "Network error. Check your connection and try again."
+  },
+  "admin": {
+    "title": "Admin Panel",
+    "vehicles": "Vehicles",
+    "samitis": "Samitis",
+    "mapping": "Vehicle–Samiti Mapping",
+    "users": "Users"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "deactivate": "Deactivate",
+    "activate": "Activate",
+    "loading": "Loading...",
+    "noData": "No data found.",
+    "active": "Active",
+    "inactive": "Inactive",
+    "logout": "Logout"
+  }
+}
