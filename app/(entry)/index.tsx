@@ -19,12 +19,15 @@ import {
 import { useKeyboardNav } from '../../src/hooks/useKeyboardNav';
 import { useEditStack } from '../../src/hooks/useEditStack';
 import { isDateLockedForSamiti } from '../../src/api/paymentEngine';
+import LoadingScreen from '../../src/components/LoadingScreen';
 import type { Vehicle, Samiti, MilkEntry } from '../../src/types';
 
 interface GridRow {
   samiti: Samiti;
   qtyText: string;
   savedQty: number | null;
+  cansText: string;
+  savedCans: number | null;
   entry: MilkEntry | null;
   status: 'idle' | 'saving' | 'saved' | 'error';
   errorMsg?: string;
@@ -33,12 +36,26 @@ interface GridRow {
 export default function MilkEntryScreen() {
   const { t } = useTranslation();
   const { session } = useAuth();
-
+ 
   // Session Controls (locked to today)
   const todayStr = new Date().toISOString().split('T')[0];
   const [date] = useState(todayStr); // Locked date
-  const [shift, setShift] = useState<'morning' | 'evening'>('morning');
+  
+  // Auto-detect shift
+  const getAutoShift = (): 'morning' | 'evening' => {
+    const hour = new Date().getHours();
+    return (hour >= 6 && hour < 17) ? 'morning' : 'evening';
+  };
+
+  const [shift, setShift] = useState<'morning' | 'evening'>(getAutoShift());
   const [mode, setMode] = useState<'vehicle' | 'self'>('vehicle');
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setShift(getAutoShift());
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Master Data
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -55,8 +72,8 @@ export default function MilkEntryScreen() {
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [loadingGrid, setLoadingGrid] = useState(false);
 
-  // Hooks for keyboard nav and undo/redo
-  const { registerRef, focusCell, focusDown, focusUp } = useKeyboardNav(gridRows.length, 1);
+  // Hooks for keyboard nav and undo/redo (2 columns: Qty, Cans)
+  const { registerRef, focusCell, focusNext, focusPrev, focusDown, focusUp } = useKeyboardNav(gridRows.length, 2);
   const { pushEdit, undo, redo, resetStack, canUndo, canRedo } = useEditStack();
 
   // Load vehicles and samitis on mount
@@ -67,13 +84,13 @@ export default function MilkEntryScreen() {
 
   // Reload grid when shift, vehicle, or mode changes
   const loadGrid = useCallback(async () => {
+    let isMounted = true;
     setLoadingGrid(true);
     resetStack();
     try {
       if (mode === 'vehicle') {
         if (!selectedVehicle) {
-          setGridRows([]);
-          setLoadingGrid(false);
+          if (isMounted) { setGridRows([]); setLoadingGrid(false); }
           return;
         }
 
@@ -84,8 +101,7 @@ export default function MilkEntryScreen() {
           .map((m) => m.samiti);
 
         if (routeSamitis.length === 0) {
-          setGridRows([]);
-          setLoadingGrid(false);
+          if (isMounted) { setGridRows([]); setLoadingGrid(false); }
           return;
         }
 
@@ -103,12 +119,14 @@ export default function MilkEntryScreen() {
             samiti,
             qtyText: matchedEntry ? matchedEntry.quantity_litres.toString() : '',
             savedQty: matchedEntry ? matchedEntry.quantity_litres : null,
+            cansText: matchedEntry ? (matchedEntry.no_of_cans || 0).toString() : '',
+            savedCans: matchedEntry ? matchedEntry.no_of_cans || 0 : null,
             entry: matchedEntry || null,
             status: matchedEntry ? 'saved' : 'idle',
           };
         });
 
-        setGridRows(rows);
+        if (isMounted) setGridRows(rows);
       } else {
         // Self-delivery mode
         const entries = await getMilkEntries({
@@ -126,19 +144,22 @@ export default function MilkEntryScreen() {
               samiti,
               qtyText: entry.quantity_litres.toString(),
               savedQty: entry.quantity_litres,
+              cansText: (entry.no_of_cans || 0).toString(),
+              savedCans: entry.no_of_cans || 0,
               entry,
               status: 'saved',
             });
           }
         }
-        setGridRows(rows);
+        if (isMounted) setGridRows(rows);
       }
     } catch (e) {
       console.error(e);
-      Alert.alert('Error', 'Failed to load milk entries.');
+      if (isMounted) Alert.alert('Error', 'Failed to load milk entries.');
     } finally {
-      setLoadingGrid(false);
+      if (isMounted) setLoadingGrid(false);
     }
+    return () => { isMounted = false; };
   }, [mode, selectedVehicle, date, shift, allSamitis, resetStack]);
 
   useEffect(() => {
@@ -175,6 +196,8 @@ export default function MilkEntryScreen() {
         samiti,
         qtyText: existing ? existing.quantity_litres.toString() : '',
         savedQty: existing ? existing.quantity_litres : null,
+        cansText: existing ? (existing.no_of_cans || 0).toString() : '',
+        savedCans: existing ? (existing.no_of_cans || 0) : null,
         entry: existing || null,
         status: existing ? 'saved' : 'idle',
       };
@@ -190,11 +213,11 @@ export default function MilkEntryScreen() {
   };
 
   // Perform single row database write
-  const saveRow = async (index: number, quantity: number, forceOverwrite = false) => {
+  const saveRow = async (index: number, quantity: number, cans: number, forceOverwrite = false) => {
     const row = gridRows[index];
     if (!row || !session) return;
 
-    // Hard block <= 0
+    // Hard block <= 0 for quantity
     if (quantity <= 0) {
       updateRowState(index, { status: 'error', errorMsg: 'Qty must be > 0' });
       return;
@@ -205,10 +228,11 @@ export default function MilkEntryScreen() {
     try {
       if (row.entry) {
         // Update existing entry
-        const updated = await updateMilkEntry(row.entry.id, quantity, session.userId);
+        const updated = await updateMilkEntry(row.entry.id, quantity, cans, session.userId);
         updateRowState(index, {
           entry: updated,
           savedQty: quantity,
+          savedCans: cans,
           status: 'saved',
         });
       } else {
@@ -232,7 +256,7 @@ export default function MilkEntryScreen() {
                   onPress: () => {
                     // Associate the existing entry ID and update it
                     updateRowState(index, { entry: duplicate });
-                    saveRow(index, quantity, true);
+                    saveRow(index, quantity, cans, true);
                   },
                 },
               ]
@@ -248,12 +272,14 @@ export default function MilkEntryScreen() {
           samiti_id: row.samiti.id,
           vehicle_id: mode === 'vehicle' ? selectedVehicle?.id || null : null,
           quantity_litres: quantity,
+          no_of_cans: cans,
           entered_by: session.userId,
         });
 
         updateRowState(index, {
           entry: created,
           savedQty: quantity,
+          savedCans: cans,
           status: 'saved',
         });
       }
@@ -277,12 +303,17 @@ export default function MilkEntryScreen() {
     updateRowState(index, { qtyText: text, status: 'idle' });
   };
 
+  const handleCansChange = (text: string, index: number) => {
+    updateRowState(index, { cansText: text, status: 'idle' });
+  };
+
   // Confirm row (on Enter or End Editing)
   const handleConfirmRow = async (index: number) => {
     const row = gridRows[index];
     if (!row) return;
 
     const val = parseFloat(row.qtyText);
+    const cansVal = parseInt(row.cansText, 10);
 
     try {
       const isLocked = await isDateLockedForSamiti(date, row.samiti.id);
@@ -292,7 +323,7 @@ export default function MilkEntryScreen() {
           'This entry is part of a finalized payment — editing it will not automatically recalculate that payment; regenerate the report if needed.',
           [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Proceed', onPress: () => proceedConfirmRow(index, val) }
+            { text: 'Proceed', onPress: () => proceedConfirmRow(index, val, cansVal) }
           ]
         );
         return;
@@ -301,12 +332,14 @@ export default function MilkEntryScreen() {
       console.error(e);
     }
 
-    proceedConfirmRow(index, val);
+    proceedConfirmRow(index, val, cansVal);
   };
 
-  const proceedConfirmRow = (index: number, val: number) => {
+  const proceedConfirmRow = (index: number, val: number, cansVal: number) => {
     const row = gridRows[index];
     if (!row) return;
+
+    const finalCans = isNaN(cansVal) ? 0 : cansVal;
 
     if (isNaN(val)) {
       // If empty and had existing entry, soft-delete it
@@ -327,6 +360,8 @@ export default function MilkEntryScreen() {
                     entry: null,
                     savedQty: null,
                     qtyText: '',
+                    savedCans: null,
+                    cansText: '',
                     status: 'idle',
                   });
                 } catch {
@@ -340,8 +375,8 @@ export default function MilkEntryScreen() {
       return;
     }
 
-    // Don't save if quantity didn't change
-    if (val === row.savedQty) {
+    // Don't save if quantity and cans didn't change
+    if (val === row.savedQty && finalCans === row.savedCans) {
       updateRowState(index, { status: 'saved' });
       return;
     }
@@ -358,11 +393,11 @@ export default function MilkEntryScreen() {
             onPress: () => {
               pushEdit({
                 rowId: row.samiti.id,
-                field: 'quantity_litres',
-                oldValue: row.savedQty,
-                newValue: val,
+                field: 'milk_entry',
+                oldValue: { qty: row.savedQty, cans: row.savedCans },
+                newValue: { qty: val, cans: finalCans },
               });
-              saveRow(index, val);
+              saveRow(index, val, finalCans);
             },
           },
         ]
@@ -372,25 +407,35 @@ export default function MilkEntryScreen() {
 
     pushEdit({
       rowId: row.samiti.id,
-      field: 'quantity_litres',
-      oldValue: row.savedQty,
-      newValue: val,
+      field: 'milk_entry',
+      oldValue: { qty: row.savedQty, cans: row.savedCans },
+      newValue: { qty: val, cans: finalCans },
     });
-    saveRow(index, val);
+    saveRow(index, val, finalCans);
   };
 
   // Keyboard navigation & shortcuts
-  const handleKeyPress = (e: any, index: number) => {
+  const handleKeyPress = (e: any, index: number, colIndex: number) => {
     const key = e.nativeEvent.key;
     if (key === 'ArrowDown') {
-      focusDown(index, 0);
+      focusDown(index, colIndex);
     } else if (key === 'ArrowUp') {
-      focusUp(index, 0);
+      focusUp(index, colIndex);
+    } else if (key === 'Enter') {
+      if (colIndex === 0) {
+        focusNext(index, colIndex);
+      } else {
+        handleConfirmRow(index);
+        if (index + 1 < gridRows.length) {
+          focusCell(index + 1, 0);
+        }
+      }
     } else if (key === 'Escape') {
       const row = gridRows[index];
       if (row) {
         updateRowState(index, {
           qtyText: row.savedQty ? row.savedQty.toString() : '',
+          cansText: row.savedCans ? row.savedCans.toString() : '',
           status: row.savedQty ? 'saved' : 'idle',
         });
       }
@@ -405,22 +450,22 @@ export default function MilkEntryScreen() {
     const index = gridRows.findIndex((r) => r.samiti.id === record.rowId);
     if (index === -1) return;
 
-    const oldVal = record.oldValue as number | null;
-    if (oldVal === null) {
+    const oldVal = record.oldValue as { qty: number | null; cans: number | null } | null;
+    if (!oldVal || oldVal.qty === null) {
       // Revert to empty (delete entry)
-      updateRowState(index, { qtyText: '', status: 'saving' });
+      updateRowState(index, { qtyText: '', cansText: '', status: 'saving' });
       const row = gridRows[index];
       if (row.entry) {
         try {
           await softDeleteMilkEntry(row.entry.id, session!.userId);
-          updateRowState(index, { entry: null, savedQty: null, status: 'idle' });
+          updateRowState(index, { entry: null, savedQty: null, savedCans: null, status: 'idle' });
         } catch {
           updateRowState(index, { status: 'error', errorMsg: 'Undo failed' });
         }
       }
     } else {
-      updateRowState(index, { qtyText: oldVal.toString() });
-      await saveRow(index, oldVal, true);
+      updateRowState(index, { qtyText: oldVal.qty.toString(), cansText: (oldVal.cans || 0).toString() });
+      await saveRow(index, oldVal.qty, oldVal.cans || 0, true);
     }
   };
 
@@ -432,9 +477,9 @@ export default function MilkEntryScreen() {
     const index = gridRows.findIndex((r) => r.samiti.id === record.rowId);
     if (index === -1) return;
 
-    const newVal = record.newValue as number;
-    updateRowState(index, { qtyText: newVal.toString() });
-    await saveRow(index, newVal, true);
+    const newVal = record.newValue as { qty: number; cans: number };
+    updateRowState(index, { qtyText: newVal.qty.toString(), cansText: newVal.cans.toString() });
+    await saveRow(index, newVal.qty, newVal.cans, true);
   };
 
   // Calculate live sum
@@ -456,6 +501,8 @@ export default function MilkEntryScreen() {
         s.name.toLowerCase().includes(samitiSearch.toLowerCase())
     );
 
+  if (!session) return <LoadingScreen />;
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -465,20 +512,9 @@ export default function MilkEntryScreen() {
       <View style={styles.header}>
         <View style={styles.metaRow}>
           <Text style={styles.metaText}>📅  {date}</Text>
-          <View style={styles.shiftSelector}>
-            <TouchableOpacity
-              style={[styles.shiftBtn, shift === 'morning' && styles.shiftBtnActive]}
-              onPress={() => setShift('morning')}
-            >
-              <Text style={[styles.shiftBtnText, shift === 'morning' && styles.shiftBtnTextActive]}>☀️ Morning</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.shiftBtn, shift === 'evening' && styles.shiftBtnActive]}
-              onPress={() => setShift('evening')}
-            >
-              <Text style={[styles.shiftBtnText, shift === 'evening' && styles.shiftBtnTextActive]}>🌙 Evening</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.metaShiftText}>
+            {shift === 'morning' ? '☀️ Morning Shift' : '🌙 Evening Shift'}
+          </Text>
         </View>
 
         {/* Mode selector */}
@@ -621,7 +657,27 @@ export default function MilkEntryScreen() {
                   value={r.qtyText}
                   onChangeText={(t) => handleQtyChange(t, index)}
                   onEndEditing={() => handleConfirmRow(index)}
-                  onKeyPress={(e) => handleKeyPress(e, index)}
+                  onKeyPress={(e) => handleKeyPress(e, index, 0)}
+                  keyboardType="numeric"
+                  selectTextOnFocus
+                />
+              </View>
+
+              {/* Cans input cell */}
+              <View style={styles.cansCellWrapper}>
+                <TextInput
+                  ref={(el) => registerRef(index, 1, el)}
+                  style={[
+                    styles.qtyInput,
+                    r.status === 'saved' && styles.qtySaved,
+                    r.status === 'error' && styles.qtyError,
+                  ]}
+                  placeholder="Cans"
+                  placeholderTextColor="#b0bec5"
+                  value={r.cansText}
+                  onChangeText={(t) => handleCansChange(t, index)}
+                  onEndEditing={() => handleConfirmRow(index)}
+                  onKeyPress={(e) => handleKeyPress(e, index, 1)}
                   keyboardType="numeric"
                   selectTextOnFocus
                 />
@@ -658,6 +714,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#fff', padding: 16, borderBottomWidth: 1, borderBottomColor: '#e3e8f0', zIndex: 10 },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   metaText: { fontSize: 15, fontWeight: '700', color: '#1a237e' },
+  metaShiftText: { fontSize: 13, fontWeight: '800', color: '#1b5e20', backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   shiftSelector: { flexDirection: 'row', gap: 6 },
   shiftBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f5f7ff', borderWidth: 1, borderColor: '#e3e8f0' },
   shiftBtnActive: { backgroundColor: '#1a237e', borderColor: '#1a237e' },
@@ -682,11 +739,12 @@ const styles = StyleSheet.create({
   samitiDetails: { flex: 1, gap: 2 },
   gridSamitiCode: { fontSize: 14, fontWeight: '700', color: '#1a237e' },
   gridSamitiName: { fontSize: 12, color: '#78909c' },
-  qtyCellWrapper: { width: 100, marginRight: 10 },
-  qtyInput: { height: 40, backgroundColor: '#f5f7ff', borderRadius: 8, textAlign: 'right', paddingHorizontal: 10, fontSize: 15, fontWeight: '600', color: '#1a237e', borderWidth: 1, borderColor: '#e3e8f0' },
+  qtyCellWrapper: { width: 85, marginRight: 8 },
+  cansCellWrapper: { width: 65, marginRight: 8 },
+  qtyInput: { height: 40, backgroundColor: '#f5f7ff', borderRadius: 8, textAlign: 'right', paddingHorizontal: 8, fontSize: 14, fontWeight: '600', color: '#1a237e', borderWidth: 1, borderColor: '#e3e8f0' },
   qtySaved: { borderColor: '#81c784', backgroundColor: '#e8f5e9' },
   qtyError: { borderColor: '#e57373', backgroundColor: '#ffebee' },
-  statusCell: { width: 30, alignItems: 'center', justifyContent: 'center' },
+  statusCell: { width: 25, alignItems: 'center', justifyContent: 'center' },
   statusSaved: { fontSize: 14 },
   statusError: { fontSize: 16 },
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#1a237e', padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

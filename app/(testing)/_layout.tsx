@@ -1,5 +1,5 @@
 import { Stack, router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { TouchableOpacity, Text } from 'react-native';
 import { useAuth } from '../../src/contexts/AuthContext';
 import LoadingScreen from '../../src/components/LoadingScreen';
@@ -14,7 +14,11 @@ export default function TestingLayout() {
   }, [session, loading]);
 
   if (loading) return <LoadingScreen />;
-  if (!session || session.role !== 'testing_user') return null;
+
+  const handleLogout = async () => {
+    router.replace('/');
+    await logout();
+  };
 
   return (
     <Stack
@@ -23,7 +27,7 @@ export default function TestingLayout() {
         headerTintColor: '#fff',
         headerTitleStyle: { fontWeight: '700' },
         headerRight: () => (
-          <TouchableOpacity onPress={async () => { await logout(); router.replace('/'); }} style={{ marginRight: 4 }}>
+          <TouchableOpacity onPress={handleLogout} style={{ marginRight: 4 }}>
             <Text style={{ color: '#fff', fontSize: 14 }}>Logout</Text>
           </TouchableOpacity>
         ),

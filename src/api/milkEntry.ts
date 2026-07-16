@@ -56,6 +56,7 @@ export async function createMilkEntry(
       samiti_id: payload.samiti_id,
       vehicle_id: payload.vehicle_id,
       quantity_litres: payload.quantity_litres,
+      no_of_cans: payload.no_of_cans,
       entered_by: payload.entered_by,
       is_deleted: false,
     })
@@ -82,6 +83,7 @@ export async function createMilkEntry(
 export async function updateMilkEntry(
   id: string,
   quantityLitres: number,
+  noOfCans: number,
   userId: string
 ): Promise<MilkEntry> {
   // Get old value first for audit
@@ -97,6 +99,7 @@ export async function updateMilkEntry(
     .from('milk_entry')
     .update({
       quantity_litres: quantityLitres,
+      no_of_cans: noOfCans,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, FlatList, TextInput,
+  Alert, ActivityIndicator, FlatList, TextInput, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getSamitis } from '../../src/api/samiti';
 import {
@@ -26,6 +27,22 @@ export default function PaymentsScreen() {
   const [year, setYear] = useState(String(currentYear));
   const [month, setMonth] = useState(currentMonth); // "01" - "12"
   const [cycle, setCycle] = useState<'1' | '2' | '3'>('1'); // Cycle 1 (1-10), Cycle 2 (11-20), Cycle 3 (21-End)
+
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const onDateChange = (event: any, date?: Date) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (date) {
+      setSelectedDate(date);
+      setYear(String(date.getFullYear()));
+      setMonth(String(date.getMonth() + 1).padStart(2, '0'));
+      const day = date.getDate();
+      if (day <= 10) setCycle('1');
+      else if (day <= 20) setCycle('2');
+      else setCycle('3');
+    }
+  };
 
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<(Payment & { samiti?: { code: string; name: string } })[]>([]);
@@ -270,27 +287,25 @@ export default function PaymentsScreen() {
       {/* Date / Cycle Selector */}
       <View style={styles.header}>
         <View style={styles.filterRow}>
-          <View style={{ flex: 2 }}>
-            <Text style={styles.label}>Year</Text>
-            <TextInput
-              style={styles.input}
-              value={year}
-              onChangeText={setYear}
-              keyboardType="numeric"
-            />
-          </View>
-          <View style={{ flex: 2 }}>
-            <Text style={styles.label}>Month</Text>
-            <TextInput
-              style={styles.input}
-              value={month}
-              onChangeText={setMonth}
-              keyboardType="numeric"
-              maxLength={2}
-            />
+          <View style={{ flex: 4 }}>
+            <Text style={styles.label}>Select Month / Date</Text>
+            <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+              <Text style={styles.datePickerBtnText}>
+                {year}-{month} (Cycle #{cycle})
+              </Text>
+              <Text style={styles.datePickerEmoji}>📅</Text>
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={selectedDate}
+                mode="date"
+                display="default"
+                onChange={onDateChange}
+              />
+            )}
           </View>
           <View style={{ flex: 3 }}>
-            <Text style={styles.label}>10-Day Cycle</Text>
+            <Text style={styles.label}>Cycle Quick Toggle</Text>
             <View style={styles.cycleRow}>
               {['1', '2', '3'].map((c) => (
                 <TouchableOpacity
@@ -390,6 +405,9 @@ const styles = StyleSheet.create({
   filterRow: { flexDirection: 'row', gap: 10 },
   label: { fontSize: 11, fontWeight: '600', color: '#78909c', marginBottom: 6 },
   input: { backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 12, height: 42, fontSize: 14, color: '#1a237e', borderWidth: 1, borderColor: '#e3e8f0', textAlign: 'center' },
+  datePickerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 14, height: 42, borderWidth: 1, borderColor: '#e3e8f0' },
+  datePickerBtnText: { fontSize: 13, color: '#1a237e', fontWeight: '600' },
+  datePickerEmoji: { fontSize: 16 },
   cycleRow: { flexDirection: 'row', gap: 4 },
   cycleBtn: { flex: 1, height: 42, backgroundColor: '#f5f7ff', borderRadius: 10, borderColor: '#e3e8f0', borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   cycleBtnActive: { backgroundColor: '#e8eaf6', borderColor: '#1a237e' },

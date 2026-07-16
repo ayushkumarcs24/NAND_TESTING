@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform,
-  Alert, Animated,
+  Alert, Animated, Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -101,11 +101,11 @@ export default function LoginScreen() {
       <Animated.View style={[styles.card, { transform: [{ translateX: shakeAnim }] }]}>
         {/* Logo */}
         <View style={styles.logoContainer}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoEmoji}>🐄</Text>
-          </View>
-          <Text style={styles.title}>{t('login.title')}</Text>
-          <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
+          <Image
+            source={require('../assets/logo.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
 
         {/* Error Message */}
@@ -199,15 +199,8 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 10,
   },
-  logoContainer: { alignItems: 'center', marginBottom: 28 },
-  logoCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: '#e8eaf6',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-  },
-  logoEmoji: { fontSize: 40 },
-  title: { fontSize: 26, fontWeight: '800', color: '#1a237e', letterSpacing: 0.5 },
-  subtitle: { fontSize: 13, color: '#90a4ae', marginTop: 4 },
+  logoContainer: { alignItems: 'center', marginBottom: 20 },
+  logoImage: { width: 280, height: 90 },
   errorBanner: {
     backgroundColor: '#fff3e0',
     borderRadius: 10,

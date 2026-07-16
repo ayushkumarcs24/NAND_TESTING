@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, FlatList,
+  ScrollView, Alert, ActivityIndicator, FlatList, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../../src/contexts/AuthContext';
 import {
   createRateChart,
@@ -28,6 +29,23 @@ export default function RateChartScreen() {
   const [slabs, setSlabs] = useState<SlabInput[]>([
     { fat_pct_from: '1.5', fat_pct_to: '5.0', snf_pct_from: '5.0', snf_pct_to: '9.0', rate_per_litre: '35.00' },
   ]);
+
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const parseDate = (dateStr: string) => {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+    return new Date();
+  };
+
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
 
   const [history, setHistory] = useState<{ effective_date: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,13 +215,21 @@ export default function RateChartScreen() {
 
         <Text style={styles.label}>Effective Date *</Text>
         <View style={styles.dateRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="#90a4ae"
-            value={effectiveDate}
-            onChangeText={setEffectiveDate}
-          />
+          <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+            <Text style={styles.datePickerBtnText}>{effectiveDate}</Text>
+            <Text style={styles.datePickerEmoji}>📅</Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={parseDate(effectiveDate)}
+              mode="date"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowDatePicker(Platform.OS === 'ios');
+                if (selectedDate) setEffectiveDate(formatDate(selectedDate));
+              }}
+            />
+          )}
           {isFuture && (
             <View style={styles.futureBadge}>
               <Text style={styles.futureText}>Future Date</Text>
@@ -321,6 +347,9 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '800', color: '#1a237e', marginBottom: 14 },
   label: { fontSize: 13, fontWeight: '600', color: '#546e7a', marginBottom: 6 },
   input: { flex: 1, backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 14, height: 46, fontSize: 15, color: '#1a237e', borderWidth: 1, borderColor: '#e3e8f0' },
+  datePickerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 14, height: 46, borderWidth: 1, borderColor: '#e3e8f0' },
+  datePickerBtnText: { fontSize: 15, color: '#1a237e', fontWeight: '600' },
+  datePickerEmoji: { fontSize: 16 },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   futureBadge: { backgroundColor: '#fff3e0', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   futureText: { color: '#e65100', fontSize: 11, fontWeight: '700' },

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/contexts/AuthContext';
+import LoadingScreen from '../../src/components/LoadingScreen';
 
 interface MenuItem {
   label: string;
@@ -23,6 +24,8 @@ const MENU_ITEMS: MenuItem[] = [
 
 export default function AdminDashboard() {
   const { session } = useAuth();
+ 
+  if (!session) return <LoadingScreen />;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

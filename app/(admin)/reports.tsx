@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, Alert, ActivityIndicator, FlatList,
+  TouchableOpacity, Alert, ActivityIndicator, FlatList, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { getSamitis } from '../../src/api/samiti';
 import { getCalculatedEntries, CalculatedEntry } from '../../src/api/paymentEngine';
 import type { Samiti } from '../../src/types';
@@ -14,14 +15,15 @@ interface ReportRow {
   samitiId: string;
   samitiCode: string;
   samitiName: string;
-  date?: string;
-  totalLitres: number;
-  weightedFat: number;
-  weightedSnf: number;
+  date: string;
+  shift: 'morning' | 'evening';
+  litres: number;
+  fat: number;
+  snf: number;
+  lacto: number;
   amountPayable: number;
-  noPaymentCount: number;
-  noPaymentLitres: number;
-  noPaymentReasons: string;
+  status: 'ok' | 'no_payment' | 'pending';
+  reason?: string;
 }
 
 export default function ReportsScreen() {
@@ -34,6 +36,27 @@ export default function ReportsScreen() {
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(todayStr);
   const [reportType, setReportType] = useState<'standard' | 'rejected'>('standard');
+  const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'evening'>('all');
+
+  // Date Pickers States
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // Helper date parsing/formatting functions
+  const parseDate = (dateStr: string) => {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+    return new Date();
+  };
+
+  const formatDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
 
   // Master lists
   const [samitis, setSamitis] = useState<Samiti[]>([]);
@@ -78,88 +101,50 @@ export default function ReportsScreen() {
 
       setRawEntries(entries);
 
+      // Filter entries by shift if shiftFilter is not 'all'
+      const filteredEntries = entries.filter((item) => {
+        if (shiftFilter !== 'all' && item.entry.shift !== shiftFilter) {
+          return false;
+        }
+        return true;
+      });
+
       // Count untested/pending entries
-      const pending = entries.filter((e) => e.status === 'pending').length;
+      const pending = filteredEntries.filter((e) => e.status === 'pending').length;
       setPendingCount(pending);
 
       // Group & aggregate entries
-      // If single day, group by Samiti. If custom date range, group by Samiti + Date
-      const isMultiDay = range === 'custom' && sDate !== eDate;
-      const groups: Record<string, CalculatedEntry[]> = {};
+      const rows: ReportRow[] = [];
 
-      for (const item of entries) {
+      for (const item of filteredEntries) {
         // Filter standard vs rejected
         if (reportType === 'rejected' && item.status !== 'no_payment') {
           continue;
         }
 
-        const key = isMultiDay
-          ? `${item.entry.samiti_id}_${item.entry.date}`
-          : item.entry.samiti_id;
-
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(item);
+        rows.push({
+          samitiId: item.entry.samiti_id,
+          samitiCode: item.entry.samiti?.code || '',
+          samitiName: item.entry.samiti?.name || '',
+          date: item.entry.date,
+          shift: item.entry.shift as 'morning' | 'evening',
+          litres: item.entry.quantity_litres,
+          fat: item.test ? item.test.fat_pct : 0,
+          snf: item.test ? item.test.snf_pct : 0,
+          lacto: item.test ? item.test.lacto_value : 0,
+          amountPayable: item.status === 'ok' ? item.amount : 0,
+          status: item.status,
+          reason: item.reason,
+        });
       }
 
-      const rows: ReportRow[] = Object.entries(groups).map(([key, items]) => {
-        const first = items[0];
-        const samitiId = first.entry.samiti_id;
-        const samitiCode = first.entry.samiti?.code || '';
-        const samitiName = first.entry.samiti?.name || '';
-        const date = isMultiDay ? first.entry.date : undefined;
-
-        let totalLitres = 0;
-        let sumFatLitres = 0;
-        let sumSnfLitres = 0;
-        let weightedLitres = 0;
-        let amountPayable = 0;
-        let noPaymentCount = 0;
-        let noPaymentLitres = 0;
-        const reasonsSet = new Set<string>();
-
-        for (const item of items) {
-          totalLitres += item.entry.quantity_litres;
-
-          if (item.status === 'pending') continue;
-
-          if (item.status === 'no_payment') {
-            noPaymentCount++;
-            noPaymentLitres += item.entry.quantity_litres;
-            if (item.reason) reasonsSet.add(item.reason);
-          } else {
-            // ok status
-            amountPayable += item.amount;
-          }
-
-          // Weighted average applies to all tested non-voided entries
-          if (item.test && !item.test.is_voided) {
-            sumFatLitres += item.test.fat_pct * item.entry.quantity_litres;
-            sumSnfLitres += item.test.snf_pct * item.entry.quantity_litres;
-            weightedLitres += item.entry.quantity_litres;
-          }
-        }
-
-        return {
-          samitiId,
-          samitiCode,
-          samitiName,
-          date,
-          totalLitres,
-          weightedFat: weightedLitres > 0 ? sumFatLitres / weightedLitres : 0,
-          weightedSnf: weightedLitres > 0 ? sumSnfLitres / weightedLitres : 0,
-          amountPayable: Math.round(amountPayable * 100) / 100,
-          noPaymentCount,
-          noPaymentLitres,
-          noPaymentReasons: Array.from(reasonsSet).join('; '),
-        };
-      });
-
-      // Sort rows by Samiti code then date
+      // Sort rows by Samiti code then date then shift
       rows.sort((a, b) => {
         const cmpCode = a.samitiCode.localeCompare(b.samitiCode);
         if (cmpCode !== 0) return cmpCode;
-        if (a.date && b.date) return a.date.localeCompare(b.date);
-        return 0;
+        const cmpDate = a.date.localeCompare(b.date);
+        if (cmpDate !== 0) return cmpDate;
+        return a.shift.localeCompare(b.shift);
       });
 
       setReportRows(rows);
@@ -172,9 +157,9 @@ export default function ReportsScreen() {
   };
 
   // Grand Totals calculations
-  const grandTotalLitres = reportRows.reduce((sum, r) => sum + r.totalLitres, 0);
+  const grandTotalLitres = reportRows.reduce((sum, r) => sum + r.litres, 0);
   const grandAmountPayable = reportRows.reduce((sum, r) => sum + r.amountPayable, 0);
-  const grandNoPaymentCount = reportRows.reduce((sum, r) => sum + r.noPaymentCount, 0);
+  const grandNoPaymentCount = reportRows.filter(r => r.status === 'no_payment').length;
 
   // Generate HTML table for printing/PDF
   const buildHtmlReport = () => {
@@ -183,20 +168,32 @@ export default function ReportsScreen() {
 
     let tableRowsHtml = reportRows
       .map(
-        (r) => `
-      <tr>
-        <td>${r.samitiCode}</td>
-        <td>${r.samitiName}</td>
-        ${r.date ? `<td>${r.date}</td>` : ''}
-        <td style="text-align:right">${r.totalLitres.toFixed(2)}</td>
-        <td style="text-align:right">${r.weightedFat.toFixed(2)}%</td>
-        <td style="text-align:right">${r.weightedSnf.toFixed(2)}%</td>
-        <td style="text-align:right">₹${r.amountPayable.toFixed(2)}</td>
-        <td style="text-align:center">${r.noPaymentCount} (${r.noPaymentLitres.toFixed(1)}L)</td>
-      </tr>
-    `
+        (r) => {
+          let statusText = 'OK';
+          if (r.status === 'pending') statusText = 'Pending Test';
+          else if (r.status === 'no_payment') statusText = `REJECTED (${r.reason || 'Failed Threshold'})`;
+
+          return `
+            <tr>
+              <td>${r.samitiCode}</td>
+              <td>${r.samitiName}</td>
+              <td>${r.date}</td>
+              <td>${r.shift === 'morning' ? '☀️ Morning' : '🌙 Evening'}</td>
+              <td style="text-align:right">${r.litres.toFixed(2)}</td>
+              <td style="text-align:right">${r.fat > 0 ? `${r.fat.toFixed(2)}%` : '-'}</td>
+              <td style="text-align:right">${r.snf > 0 ? `${r.snf.toFixed(2)}%` : '-'}</td>
+              <td style="text-align:right">${r.lacto > 0 ? r.lacto.toFixed(1) : '-'}</td>
+              <td style="text-align:right">₹${r.amountPayable.toFixed(2)}</td>
+              <td style="${r.status === 'no_payment' ? 'color:#c62828;font-weight:bold;' : ''}">${statusText}</td>
+            </tr>
+          `;
+        }
       )
       .join('');
+
+    let shiftLabel = 'All Shifts';
+    if (shiftFilter === 'morning') shiftLabel = '☀️ Morning';
+    else if (shiftFilter === 'evening') shiftLabel = '🌙 Evening';
 
     return `
       <html>
@@ -206,7 +203,7 @@ export default function ReportsScreen() {
             h2 { color: #1a237e; text-align: center; }
             h4 { text-align: center; color: #546e7a; margin-top: -5px; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #cfd8dc; padding: 8px; font-size: 12px; }
+            th, td { border: 1px solid #cfd8dc; padding: 8px; font-size: 11px; }
             th { background-color: #1a237e; color: #fff; text-align: left; }
             tr:nth-child(even) { background-color: #f5f7ff; }
             .grand-total { font-weight: bold; background-color: #e8eaf6 !important; }
@@ -215,29 +212,31 @@ export default function ReportsScreen() {
         </head>
         <body>
           <h2>Nand Dairy Collection Report</h2>
-          <h4>Period: ${sDate} to ${eDate} | Mode: ${reportType.toUpperCase()}</h4>
+          <h4>Period: ${sDate} to ${eDate} | Shift: ${shiftLabel} | Mode: ${reportType.toUpperCase()}</h4>
           ${pendingCount > 0 ? `<div class="provisional">⚠️ PROVISIONAL - ${pendingCount} entries pending test</div>` : ''}
           <table>
             <thead>
               <tr>
                 <th>Code</th>
                 <th>Samiti</th>
-                ${range === 'custom' ? '<th>Date</th>' : ''}
-                <th style="text-align:right">Total Litres</th>
-                <th style="text-align:right">Avg Fat</th>
-                <th style="text-align:right">Avg SNF</th>
+                <th>Date</th>
+                <th>Shift</th>
+                <th style="text-align:right">Litres</th>
+                <th style="text-align:right">Fat</th>
+                <th style="text-align:right">SNF</th>
+                <th style="text-align:right">Lacto</th>
                 <th style="text-align:right">Payable Amount</th>
-                <th style="text-align:center">Rejected (Litres)</th>
+                <th>Status / Reason</th>
               </tr>
             </thead>
             <tbody>
               ${tableRowsHtml}
               <tr class="grand-total">
-                <td colspan="${range === 'custom' ? '3' : '2'}">GRAND TOTAL</td>
+                <td colspan="4">GRAND TOTAL</td>
                 <td style="text-align:right">${grandTotalLitres.toFixed(2)} L</td>
-                <td colspan="2"></td>
+                <td colspan="3"></td>
                 <td style="text-align:right">₹${grandAmountPayable.toFixed(2)}</td>
-                <td style="text-align:center">${grandNoPaymentCount}</td>
+                <td>Rejections: ${grandNoPaymentCount}</td>
               </tr>
             </tbody>
           </table>
@@ -270,21 +269,22 @@ export default function ReportsScreen() {
     }
 
     try {
-      const headers = ['Samiti Code', 'Samiti Name', ...(range === 'custom' ? ['Date'] : []), 'Total Litres', 'Avg Fat%', 'Avg SNF%', 'Amount Payable', 'Rejected Count', 'Rejected Litres', 'Rejection Reasons'];
+      const headers = ['Samiti Code', 'Samiti Name', 'Date', 'Shift', 'Litres', 'Fat%', 'SNF%', 'Lacto', 'Amount Payable', 'Status', 'Reason'];
       const lines = [headers.join(',')];
 
       for (const r of reportRows) {
         const rowData = [
           `"${r.samitiCode}"`,
           `"${r.samitiName}"`,
-          ...(r.date ? [r.date] : []),
-          r.totalLitres.toFixed(2),
-          r.weightedFat.toFixed(2),
-          r.weightedSnf.toFixed(2),
+          r.date,
+          r.shift,
+          r.litres.toFixed(2),
+          r.fat.toFixed(2),
+          r.snf.toFixed(2),
+          r.lacto.toFixed(1),
           r.amountPayable.toFixed(2),
-          r.noPaymentCount,
-          r.noPaymentLitres.toFixed(2),
-          `"${r.noPaymentReasons}"`,
+          r.status,
+          `"${r.reason || ''}"`,
         ];
         lines.push(rowData.join(','));
       }
@@ -293,14 +293,15 @@ export default function ReportsScreen() {
       const grandTotalRow = [
         'GRAND TOTAL',
         '',
-        ...(range === 'custom' ? [''] : []),
+        '',
+        '',
         grandTotalLitres.toFixed(2),
         '',
         '',
+        '',
         grandAmountPayable.toFixed(2),
-        grandNoPaymentCount,
         '',
-        '',
+        `"Total Rejections: ${grandNoPaymentCount}"`,
       ];
       lines.push(grandTotalRow.join(','));
 
@@ -375,6 +376,29 @@ export default function ReportsScreen() {
           </View>
         )}
 
+        {/* Shift Filter */}
+        <Text style={styles.label}>Shift</Text>
+        <View style={styles.toggleRow}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, shiftFilter === 'all' && styles.toggleBtnActive]}
+            onPress={() => setShiftFilter('all')}
+          >
+            <Text style={[styles.toggleBtnText, shiftFilter === 'all' && styles.toggleBtnTextActive]}>All Shifts</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, shiftFilter === 'morning' && styles.toggleBtnActive]}
+            onPress={() => setShiftFilter('morning')}
+          >
+            <Text style={[styles.toggleBtnText, shiftFilter === 'morning' && styles.toggleBtnTextActive]}>Morning</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, shiftFilter === 'evening' && styles.toggleBtnActive]}
+            onPress={() => setShiftFilter('evening')}
+          >
+            <Text style={[styles.toggleBtnText, shiftFilter === 'evening' && styles.toggleBtnTextActive]}>Evening</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Range Selection */}
         <Text style={styles.label}>Date Range</Text>
         <View style={styles.toggleRow}>
@@ -395,22 +419,40 @@ export default function ReportsScreen() {
         <View style={styles.dateInputs}>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>{range === 'single' ? 'Date' : 'Start Date'}</Text>
-            <TextInput
-              style={styles.input}
-              value={startDate}
-              onChangeText={setStartDate}
-              placeholder="YYYY-MM-DD"
-            />
+            <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowStartPicker(true)}>
+              <Text style={styles.datePickerBtnText}>{startDate}</Text>
+              <Text style={styles.datePickerEmoji}>📅</Text>
+            </TouchableOpacity>
+            {showStartPicker && (
+              <DateTimePicker
+                value={parseDate(startDate)}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowStartPicker(Platform.OS === 'ios');
+                  if (selectedDate) setStartDate(formatDate(selectedDate));
+                }}
+              />
+            )}
           </View>
           {range === 'custom' && (
             <View style={{ flex: 1 }}>
               <Text style={styles.label}>End Date</Text>
-              <TextInput
-                style={styles.input}
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-              />
+              <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowEndPicker(true)}>
+                <Text style={styles.datePickerBtnText}>{endDate}</Text>
+                <Text style={styles.datePickerEmoji}>📅</Text>
+              </TouchableOpacity>
+              {showEndPicker && (
+                <DateTimePicker
+                  value={parseDate(endDate)}
+                  mode="date"
+                  display="default"
+                  onChange={(event, selectedDate) => {
+                    setShowEndPicker(Platform.OS === 'ios');
+                    if (selectedDate) setEndDate(formatDate(selectedDate));
+                  }}
+                />
+              )}
             </View>
           )}
         </View>
@@ -449,32 +491,34 @@ export default function ReportsScreen() {
 
           <FlatList
             data={reportRows}
-            keyExtractor={(item, idx) => `${item.samitiId}_${idx}`}
+            keyExtractor={(item, idx) => `${item.samitiId}_${item.date}_${item.shift}_${idx}`}
             scrollEnabled={false}
             renderItem={({ item: r }) => (
               <View style={styles.reportRow}>
                 <View style={styles.rowTop}>
                   <Text style={styles.samitiLabel}>{r.samitiCode} - {r.samitiName}</Text>
-                  {r.date && <Text style={styles.rowDate}>{r.date}</Text>}
+                  <Text style={styles.rowDate}>{r.date} | {r.shift === 'morning' ? '☀️ Morning' : '🌙 Evening'}</Text>
                 </View>
                 <View style={styles.rowGrid}>
                   <View style={styles.gridCell}>
                     <Text style={styles.cellLabel}>Litres</Text>
-                    <Text style={styles.cellVal}>{r.totalLitres.toFixed(1)} L</Text>
+                    <Text style={styles.cellVal}>{r.litres.toFixed(1)} L</Text>
                   </View>
                   <View style={styles.gridCell}>
-                    <Text style={styles.cellLabel}>Avg Fat/SNF</Text>
-                    <Text style={styles.cellVal}>{r.weightedFat.toFixed(1)} / {r.weightedSnf.toFixed(1)}</Text>
+                    <Text style={styles.cellLabel}>Fat / SNF / Lacto</Text>
+                    <Text style={styles.cellVal}>
+                      {r.fat > 0 ? r.fat.toFixed(2) : '-'}% / {r.snf > 0 ? r.snf.toFixed(2) : '-'}% / {r.lacto > 0 ? r.lacto.toFixed(1) : '-'}
+                    </Text>
                   </View>
                   <View style={styles.gridCell}>
                     <Text style={styles.cellLabel}>Amount</Text>
                     <Text style={styles.cellValAmount}>₹{r.amountPayable.toFixed(2)}</Text>
                   </View>
                 </View>
-                {r.noPaymentCount > 0 && (
+                {r.status === 'no_payment' && (
                   <View style={styles.rejectionBox}>
                     <Text style={styles.rejectionText}>
-                      ⚠️  Rejected: {r.noPaymentCount} tests ({r.noPaymentLitres.toFixed(1)}L). Reason: {r.noPaymentReasons}
+                      ⚠️  Rejected. Reason: {r.reason || 'Failed quality threshold'}
                     </Text>
                   </View>
                 )}
@@ -523,6 +567,9 @@ const styles = StyleSheet.create({
   samitiChipText: { fontSize: 12, color: '#546e7a', fontWeight: '600' },
   samitiChipTextActive: { color: '#1a237e' },
   dateInputs: { flexDirection: 'row', gap: 12 },
+  datePickerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 14, height: 46, borderWidth: 1, borderColor: '#e3e8f0' },
+  datePickerBtnText: { fontSize: 14, color: '#1a237e', fontWeight: '600' },
+  datePickerEmoji: { fontSize: 16 },
   input: { backgroundColor: '#f5f7ff', borderRadius: 10, paddingHorizontal: 14, height: 46, fontSize: 14, color: '#1a237e', borderWidth: 1, borderColor: '#e3e8f0' },
   generateBtn: { backgroundColor: '#1a237e', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
   generateBtnDisabled: { backgroundColor: '#90a4ae' },

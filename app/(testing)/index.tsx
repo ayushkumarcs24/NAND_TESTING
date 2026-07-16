@@ -12,6 +12,7 @@ import {
   deleteMilkTest,
   PendingTest,
 } from '../../src/api/milkTesting';
+import LoadingScreen from '../../src/components/LoadingScreen';
 import { getRateChartForDate } from '../../src/api/config';
 import { useKeyboardNav } from '../../src/hooks/useKeyboardNav';
 import { useEditStack } from '../../src/hooks/useEditStack';
@@ -40,7 +41,7 @@ const LIMITS = {
 export default function MilkTestingScreen() {
   const { t } = useTranslation();
   const { session } = useAuth();
-
+ 
   const [rows, setRows] = useState<TestRowInput[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -376,6 +377,8 @@ export default function MilkTestingScreen() {
       return copy;
     });
   };
+
+  if (!session) return <LoadingScreen />;
 
   if (loading) {
     return (

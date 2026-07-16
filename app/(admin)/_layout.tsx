@@ -1,5 +1,5 @@
 import { Stack, router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { TouchableOpacity, Text } from 'react-native';
 import { useAuth } from '../../src/contexts/AuthContext';
 import LoadingScreen from '../../src/components/LoadingScreen';
@@ -13,13 +13,13 @@ export default function AdminLayout() {
     }
   }, [session, loading]);
 
-  if (loading) return <LoadingScreen />;
-  if (!session || session.role !== 'admin') return null;
-
-  async function handleLogout() {
-    await logout();
+  const handleLogout = useCallback(async () => {
+    // Navigate first so the layout unmounts cleanly, then clear the session
     router.replace('/');
-  }
+    await logout();
+  }, [logout]);
+
+  if (loading) return <LoadingScreen />;
 
   return (
     <Stack

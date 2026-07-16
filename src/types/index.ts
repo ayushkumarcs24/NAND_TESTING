@@ -40,6 +40,7 @@ export interface MilkEntry {
   samiti_id: string;
   vehicle_id: string | null; // null for self-delivery samitis
   quantity_litres: number;
+  no_of_cans: number;
   entered_by: string; // user_id
   created_at: string;
   updated_at: string;
